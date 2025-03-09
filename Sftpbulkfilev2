@@ -1,0 +1,84 @@
+import com.jcraft.jsch.*;
+import java.io.InputStream;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+public class SFTPBulkCopy {
+    private static final int THREAD_COUNT = 5; // Adjust based on server capacity
+
+    public static void main(String[] args) {
+        String host = "your-server-ip";
+        int port = 22;
+        String user = "your-username";
+        String password = "your-password";
+
+        String sourceDir = "/remote/source-folder/";
+        String destinationDir = "/remote/destination-folder/";
+
+        ExecutorService executorService = Executors.newFixedThreadPool(THREAD_COUNT);
+
+        try {
+            Session session = createSFTPSession(host, port, user, password);
+            ChannelSftp sftpChannel = openSFTPChannel(session);
+
+            // Stream file processing instead of fetching all at once
+            sftpChannel.ls(sourceDir, entry -> {
+                String fileName = entry.getFilename();
+                if (!fileName.equals(".") && !fileName.equals("..")) {
+                    executorService.submit(() -> copyFile(fileName, sourceDir, destinationDir, host, port, user, password));
+                }
+                return ChannelSftp.LsEntrySelector.CONTINUE;
+            });
+
+            // Shutdown executor after processing
+            executorService.shutdown();
+            executorService.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
+
+            System.out.println("File transfer completed.");
+
+            sftpChannel.exit();
+            session.disconnect();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static void copyFile(String fileName, String sourceDir, String destinationDir, String host, int port, String user, String password) {
+        Session session = null;
+        ChannelSftp sftpChannel = null;
+        try {
+            session = createSFTPSession(host, port, user, password);
+            sftpChannel = openSFTPChannel(session);
+
+            String sourcePath = sourceDir + fileName;
+            String destinationPath = destinationDir + fileName;
+
+            try (InputStream inputStream = sftpChannel.get(sourcePath)) {
+                sftpChannel.put(inputStream, destinationPath);
+                System.out.println("Copied: " + fileName);
+            }
+
+        } catch (Exception e) {
+            System.err.println("Failed to copy: " + fileName + " -> " + e.getMessage());
+        } finally {
+            if (sftpChannel != null) sftpChannel.exit();
+            if (session != null) session.disconnect();
+        }
+    }
+
+    private static Session createSFTPSession(String host, int port, String user, String password) throws JSchException {
+        JSch jsch = new JSch();
+        Session session = jsch.getSession(user, host, port);
+        session.setPassword(password);
+        session.setConfig("StrictHostKeyChecking", "no");
+        session.connect();
+        return session;
+    }
+
+    private static ChannelSftp openSFTPChannel(Session session) throws JSchException {
+        Channel channel = session.openChannel("sftp");
+        channel.connect();
+        return (ChannelSftp) channel;
+    }
+}
