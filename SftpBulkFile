@@ -1,0 +1,89 @@
+import com.jcraft.jsch.*;
+import java.io.InputStream;
+import java.util.Vector;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+public class SFTPBulkCopyMultiThreaded {
+    private static final int THREAD_COUNT = 10; // Number of parallel threads
+    private static ChannelSftp sftpChannel;
+    
+    public static void main(String[] args) {
+        String host = "your-server-ip";
+        int port = 22;
+        String user = "your-username";
+        String password = "your-password";
+
+        String sourceDir = "/remote/source-folder/";
+        String destinationDir = "/remote/destination-folder/";
+
+        Session session = null;
+
+        try {
+            JSch jsch = new JSch();
+            session = jsch.getSession(user, host, port);
+            session.setPassword(password);
+
+            // Disable strict host checking
+            session.setConfig("StrictHostKeyChecking", "no");
+
+            // Set compatible KEX algorithms
+            java.util.Properties config = new java.util.Properties();
+            config.put("kex", "curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,diffie-hellman-group14-sha256");
+            session.setConfig(config);
+
+            session.connect();
+            System.out.println("Connected to SFTP server.");
+
+            Channel channel = session.openChannel("sftp");
+            channel.connect();
+            sftpChannel = (ChannelSftp) channel;
+
+            // Get list of files in source directory
+            Vector<ChannelSftp.LsEntry> files = sftpChannel.ls(sourceDir);
+
+            // Create thread pool
+            ExecutorService executorService = Executors.newFixedThreadPool(THREAD_COUNT);
+
+            int[] count = {0};
+
+            for (ChannelSftp.LsEntry file : files) {
+                String fileName = file.getFilename();
+                if (fileName.equals(".") || fileName.equals("..")) continue;
+
+                String sourcePath = sourceDir + fileName;
+                String destinationPath = destinationDir + fileName;
+
+                executorService.submit(() -> {
+                    try (InputStream inputStream = sftpChannel.get(sourcePath)) {
+                        sftpChannel.put(inputStream, destinationPath);
+                        synchronized (count) {
+                            count[0]++;
+                            if (count[0] % 1000 == 0) {
+                                System.out.println("Copied " + count[0] + " files...");
+                            }
+                        }
+                    } catch (Exception e) {
+                        System.err.println("Failed to copy: " + fileName + " -> " + e.getMessage());
+                    }
+                });
+            }
+
+            executorService.shutdown();
+            executorService.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
+
+            System.out.println("Completed copying " + count[0] + " files.");
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            if (sftpChannel != null) {
+                sftpChannel.exit();
+            }
+            if (session != null) {
+                session.disconnect();
+            }
+        }
+    }
+}
