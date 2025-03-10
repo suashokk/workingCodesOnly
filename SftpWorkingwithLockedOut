@@ -1,0 +1,141 @@
+import com.jcraft.jsch.*;
+import java.io.InputStream;
+import java.util.concurrent.*;
+
+public class SFTPConnectionPooling {
+    private static final int MAX_CONNECTIONS = 5; // Limit concurrent logins to avoid account lock
+    private static final int THREAD_COUNT = calculateOptimalThreads(); // Dynamic thread count
+    private static final LinkedBlockingQueue<ChannelSftp> sftpPool = new LinkedBlockingQueue<>(MAX_CONNECTIONS);
+
+    public static void main(String[] args) {
+        // SFTP Server Details
+        String host = "your-server-ip";
+        int port = 22;
+        String user = "your-username";
+        String password = "your-password";
+
+        // Define source and destination directories on the SFTP server
+        String sourceDir = "/remote/source-folder/";
+        String destinationDir = "/remote/destination-folder/";
+
+        // Initialize a thread pool for parallel processing of file transfers
+        ExecutorService executorService = Executors.newFixedThreadPool(THREAD_COUNT);
+        System.out.println("Using " + THREAD_COUNT + " threads for processing.");
+
+        try {
+            // Pre-create and store SFTP connections in a pool for reuse
+            for (int i = 0; i < MAX_CONNECTIONS; i++) {
+                sftpPool.add(createSFTPChannel(host, port, user, password));
+            }
+
+            // Establish a session to list all files in the directory
+            Session session = createSFTPSession(host, port, user, password);
+            ChannelSftp sftpChannel = openSFTPChannel(session);
+
+            // Stream file processing instead of fetching all at once (avoids memory overload)
+            sftpChannel.ls(sourceDir, entry -> {
+                String fileName = entry.getFilename();
+
+                // Ignore hidden/system files (".", "..")
+                if (!fileName.equals(".") && !fileName.equals("..")) {
+                    // Submit each file processing task to the thread pool
+                    executorService.submit(() -> copyFile(fileName, sourceDir, destinationDir));
+                }
+                return ChannelSftp.LsEntrySelector.CONTINUE;
+            });
+
+            // Shutdown executor after processing all files
+            executorService.shutdown();
+            executorService.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
+
+            System.out.println("File transfer completed.");
+
+            // Close the main SFTP session used for listing files
+            sftpChannel.exit();
+            session.disconnect();
+
+            // Close all pooled SFTP connections
+            while (!sftpPool.isEmpty()) {
+                sftpPool.poll().exit();
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Copies a file from the source directory to the destination directory.
+     */
+    private static void copyFile(String fileName, String sourceDir, String destinationDir) {
+        ChannelSftp sftpChannel = null;
+        try {
+            // Fetch an available SFTP connection from the pool
+            sftpChannel = sftpPool.poll(10, TimeUnit.SECONDS);
+            if (sftpChannel == null) throw new RuntimeException("No available SFTP connections!");
+
+            String sourcePath = sourceDir + fileName;
+            String destinationPath = destinationDir + fileName;
+
+            // Open an input stream for the source file and copy it to the destination
+            try (InputStream inputStream = sftpChannel.get(sourcePath)) {
+                sftpChannel.put(inputStream, destinationPath);
+                System.out.println("Copied: " + fileName);
+            }
+
+        } catch (Exception e) {
+            System.err.println("Failed to copy: " + fileName + " -> " + e.getMessage());
+        } finally {
+            // Return the SFTP connection back to the pool for reuse
+            if (sftpChannel != null) {
+                sftpPool.offer(sftpChannel);
+            }
+        }
+    }
+
+    /**
+     * Establishes an SSH session with the SFTP server.
+     */
+    private static Session createSFTPSession(String host, int port, String user, String password) throws JSchException {
+        JSch jsch = new JSch();
+        Session session = jsch.getSession(user, host, port);
+        session.setPassword(password);
+        session.setConfig("StrictHostKeyChecking", "no");
+
+        // Prevent multiple failed login attempts and reduce authentication failures
+        session.setConfig("MaxAuthTries", "1");
+        session.setConfig("PreferredAuthentications", "publickey,password");
+
+        session.connect();
+        return session;
+    }
+
+    /**
+     * Opens an SFTP channel for file transfer.
+     */
+    private static ChannelSftp openSFTPChannel(Session session) throws JSchException {
+        Channel channel = session.openChannel("sftp");
+        channel.connect();
+        return (ChannelSftp) channel;
+    }
+
+    /**
+     * Creates an SFTP connection and returns it for reuse.
+     */
+    private static ChannelSftp createSFTPChannel(String host, int port, String user, String password) throws JSchException {
+        Session session = createSFTPSession(host, port, user, password);
+        return openSFTPChannel(session);
+    }
+
+    /**
+     * Dynamically calculates the optimal number of threads for parallel processing.
+     */
+    private static int calculateOptimalThreads() {
+        int cpuCores = Runtime.getRuntime().availableProcessors(); // Detect available CPU cores
+        int networkSpeedFactor = 10; // Adjust based on network bandwidth
+        int maxServerSessions = 10; // Set based on SSH server limits (MaxSessions)
+
+        // Calculate based on CPU, network, and server constraints
+        return Math.min(cpuCores * networkSpeedFactor, maxServerSessions);
+    }
+}
