@@ -1,0 +1,138 @@
+import com.jcraft.jsch.*;
+import java.util.List;
+import java.util.Arrays;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+public class BulkSftpTransfer {
+    // SFTP server credentials and settings
+    private static final String SFTP_HOST = "sftp.example.com";
+    private static final int SFTP_PORT = 22;
+    private static final String SFTP_USER = "yourUsername";
+    private static final String SFTP_PASS = "yourPassword";
+    private static final String REMOTE_DIR = "/remote/target/dir";  // remote directory to upload to
+    private static final int THREAD_COUNT = 5;       // number of parallel SFTP connections (tune as needed)
+    private static final int MAX_RETRIES = 3;        // retries for each file on failure
+
+    public static void main(String[] args) throws InterruptedException {
+        // Example list of files to transfer (in practice, gather this list from directory or arguments)
+        List<String> filesToTransfer = Arrays.asList(
+            /* populate with 100,000 file paths */ 
+            "/local/path/file1.dat", 
+            "/local/path/file2.dat" 
+            // ... up to 100k files
+        );
+
+        // Use a thread-safe queue to distribute files to worker threads
+        BlockingQueue<String> fileQueue = new ArrayBlockingQueue<>(filesToTransfer.size());
+        fileQueue.addAll(filesToTransfer);
+
+        // Create a fixed thread pool for SFTP workers
+        ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);
+        for (int i = 0; i < THREAD_COUNT; i++) {
+            executor.execute(new SftpWorker(fileQueue));
+        }
+
+        // Shutdown the executor and wait for all tasks to finish
+        executor.shutdown();
+        executor.awaitTermination(1, TimeUnit.HOURS);  // adjust timeout as needed for 100k files
+
+        System.out.println("All file transfers completed.");
+    }
+
+    /** Worker task that takes files from the queue and transfers them via SFTP. */
+    static class SftpWorker implements Runnable {
+        private final BlockingQueue<String> fileQueue;
+        public SftpWorker(BlockingQueue<String> fileQueue) {
+            this.fileQueue = fileQueue;
+        }
+
+        @Override
+        public void run() {
+            Session session = null;
+            ChannelSftp channel = null;
+            try {
+                // Initialize JSch session for this thread (reuse for multiple files)
+                JSch jsch = new JSch();
+                session = jsch.getSession(SFTP_USER, SFTP_HOST, SFTP_PORT);
+                session.setPassword(SFTP_PASS);
+                session.setConfig("StrictHostKeyChecking", "no");  // disable host key checking for demo
+                // Optionally set keep-alive to prevent idle timeout
+                session.setServerAliveInterval(60000);  // send keepalive every 60 seconds6
+                session.connect();  // establish SSH session
+
+                // Open an SFTP channel on the session
+                channel = (ChannelSftp) session.openChannel("sftp");
+                channel.connect();
+                System.out.println("SFTP channel established on thread " + Thread.currentThread().getName());
+
+                // Continuously take files from the queue until empty
+                String filePath;
+                while ((filePath = fileQueue.poll()) != null) {
+                    String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
+                    String remotePath = REMOTE_DIR + "/" + fileName;
+                    // Try to transfer the file with a few retries for robustness
+                    boolean success = false;
+                    for (int attempt = 1; attempt <= MAX_RETRIES && !success; attempt++) {
+                        try {
+                            channel.put(filePath, remotePath);  // upload file
+                            success = true;  // if put() returns without exception, success
+                            System.out.println("Uploaded " + fileName + " (thread " 
+                                               + Thread.currentThread().getName() + ")");
+                        } catch (SftpException e) {
+                            System.err.println("Transfer failed for " + fileName + " (attempt " 
+                                               + attempt + "): " + e.getMessage());
+                            // If it's not the last attempt, try to recover and retry
+                            if (attempt < MAX_RETRIES) {
+                                // Reconnect logic for transient errors
+                                reconnectChannel();  // reconnects 'session' and 'channel'
+                                try {
+                                    Thread.sleep(1000); // brief pause before retry (avoid tight loop)
+                                } catch (InterruptedException ie) {
+                                    Thread.currentThread().interrupt();
+                                }
+                            } else {
+                                // Log final failure after retries (could also record to a list/file)
+                                System.err.println("Giving up on " + fileName + " after " + MAX_RETRIES + " attempts.");
+                            }
+                        }
+                    }
+                }
+            } catch (JSchException e) {
+                System.err.println("SFTP setup error: " + e.getMessage());
+            } finally {
+                // Clean up: disconnect channel and session to avoid resource leaks7
+                if (channel != null && channel.isConnected()) {
+                    channel.disconnect();
+                }
+                if (session != null && session.isConnected()) {
+                    session.disconnect();
+                }
+            }
+        }
+
+        /** Helper to reconnect the SFTP session/channel in case of failure. */
+        private void reconnectChannel() throws JSchException {
+            // Disconnect old channel/session if still open
+            if (channel != null && channel.isConnected()) {
+                channel.disconnect();
+            }
+            if (session != null && session.isConnected()) {
+                session.disconnect();
+            }
+            // Open a new session and channel
+            JSch jsch = new JSch();
+            session = jsch.getSession(SFTP_USER, SFTP_HOST, SFTP_PORT);
+            session.setPassword(SFTP_PASS);
+            session.setConfig("StrictHostKeyChecking", "no");
+            session.setServerAliveInterval(60000);
+            session.connect();
+            channel = (ChannelSftp) session.openChannel("sftp");
+            channel.connect();
+            System.out.println("Reconnected SFTP channel on thread " + Thread.currentThread().getName());
+        }
+    }
+}
