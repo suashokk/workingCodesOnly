@@ -1,3 +1,46 @@
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+@RestController
+@RequestMapping("/collect")
+public class FileController {
+
+    private static final String SAVE_DIRECTORY = "/tmp/"; // Change as needed
+
+    @PostMapping(value = "/move", consumes = "application/octet-stream")
+    public ResponseEntity<String> moveFile(@RequestBody byte[] fileData,
+                                           @RequestParam String fileName) {
+        try {
+            // Ensure directory exists
+            Path savePath = Paths.get(SAVE_DIRECTORY);
+            if (!Files.exists(savePath)) {
+                Files.createDirectories(savePath);
+            }
+
+            // Create the file path with the original filename
+            Path filePath = Paths.get(SAVE_DIRECTORY, fileName);
+
+            // Write the file bytes to the destination
+            Files.write(filePath, fileData);
+
+            return ResponseEntity.ok("File received and saved at: " + filePath.toString());
+
+        } catch (IOException e) {
+            return ResponseEntity.status(500).body("File processing failed: " + e.getMessage());
+        }
+    }
+}
+
+
+
 This code is for over netwrok transfer
 
 @PostMapping("/send")
