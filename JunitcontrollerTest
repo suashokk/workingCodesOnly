@@ -1,0 +1,76 @@
+package com.example.sftp.controller;
+
+import com.example.sftp.service.SecureFileTransferService;
+import com.example.sftp.response.SecureFileTransferResponseMessage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.ResponseEntity;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+import static org.springframework.http.MediaType.APPLICATION_OCTET_STREAM_VALUE;
+
+@ExtendWith(MockitoExtension.class)
+class SecureFileTransferControllerTest {
+
+    @InjectMocks
+    private SecureFileTransferController secureFileTransferController;
+
+    @Mock
+    private SecureFileTransferService secureFileTransferService;
+
+    private final byte[] fileData = "test file content".getBytes();
+    private final String fileName = "test.txt";
+    private final String sourceFilePath = "/source/path/";
+    private final String destinationFilePath = "/destination/path/";
+
+    @BeforeEach
+    void setup() {
+        // Reset mocks before each test
+        reset(secureFileTransferService);
+    }
+
+    @Test
+    void shouldTransferFileSuccessfully() {
+        // Given: Mock service response
+        SecureFileTransferResponseMessage responseMessage = new SecureFileTransferResponseMessage("Success");
+        when(secureFileTransferService.transferFileFromAPIToServer(fileData, fileName, sourceFilePath, destinationFilePath))
+                .thenReturn(responseMessage);
+
+        // When: Call moveFile
+        ResponseEntity<SecureFileTransferResponseMessage> response = secureFileTransferController.moveFile(fileData, fileName, sourceFilePath, destinationFilePath);
+
+        // Then: Verify behavior and assertions
+        assertNotNull(response);
+        assertEquals("Success", response.getBody().getMessage());
+        verify(secureFileTransferService, times(1)).transferFileFromAPIToServer(fileData, fileName, sourceFilePath, destinationFilePath);
+    }
+
+    @Test
+    void shouldReturnNullForInvalidInputs() {
+        // When: Call moveFile with invalid inputs
+        ResponseEntity<SecureFileTransferResponseMessage> response = secureFileTransferController.moveFile(new byte[]{}, "", "", "");
+
+        // Then: Should return null
+        assertNull(response);
+        verify(secureFileTransferService, never()).transferFileFromAPIToServer(any(), any(), any(), any());
+    }
+
+    @Test
+    void shouldHandleExceptionDuringTransfer() {
+        // Given: Mock exception scenario
+        when(secureFileTransferService.transferFileFromAPIToServer(any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("SFTP Transfer Error"));
+
+        // When: Call moveFile and handle exception
+        ResponseEntity<SecureFileTransferResponseMessage> response = secureFileTransferController.moveFile(fileData, fileName, sourceFilePath, destinationFilePath);
+
+        // Then: Should log the error and return null
+        assertNull(response);
+        verify(secureFileTransferService, times(1)).transferFileFromAPIToServer(fileData, fileName, sourceFilePath, destinationFilePath);
+    }
+}
