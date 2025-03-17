@@ -1,0 +1,98 @@
+package com.example.sftp.service;
+
+import com.example.sftp.response.SecureFileTransferResponseMessage;
+import com.jcraft.jsch.ChannelSftp;
+import com.jcraft.jsch.Session;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.ResponseEntity;
+
+import java.io.IOException;
+import java.nio.file.Path;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+import static org.springframework.http.HttpStatus.OK;
+
+@ExtendWith(MockitoExtension.class)
+class SecureFileTransferServiceTest {
+
+    @InjectMocks
+    private SecureFileTransferService secureFileTransferService;
+
+    @Mock
+    private ChannelSftp sftpChannel;
+
+    @Mock
+    private Session session;
+
+    private final byte[] fileData = "test content".getBytes();
+    private final String fileName = "test.txt";
+    private final String sourceFilePath = "/source/path/";
+    private final String destinationFilePath = "/destination/path/";
+
+    @BeforeEach
+    void setup() {
+        reset(sftpChannel, session);
+    }
+
+    @Test
+    void shouldTransferFileSuccessfully() throws Exception {
+        // Given: Mocked path storage
+        Path mockPath = Path.of("/mock/storage/");
+
+        // Mock behavior of saving file locally
+        SecureFileTransferService secureFileTransferServiceSpy = spy(secureFileTransferService);
+        doReturn(mockPath).when(secureFileTransferServiceSpy).saveFileLocallyForSFTPTransfer(anyString(), anyString(), any());
+
+        // Mock successful connection
+        doReturn(sftpChannel).when(secureFileTransferServiceSpy).createConnectionForSFTPChannel(anyString(), anyString(), anyString());
+
+        // When: Calling the method
+        ResponseEntity<SecureFileTransferResponseMessage> response = 
+            secureFileTransferServiceSpy.transferFileFromAPIToServer(fileData, fileName, sourceFilePath, destinationFilePath);
+
+        // Then: Validate response and calls
+        assertNotNull(response);
+        assertEquals(OK, response.getStatusCode());
+        assertTrue(response.getBody().isSuccess());
+        verify(sftpChannel, times(1)).exit();
+        verify(session, never()).disconnect(); // Since session is not part of method directly
+    }
+
+    @Test
+    void shouldHandleExceptionDuringTransfer() throws Exception {
+        // Given: Mock exception in file transfer
+        SecureFileTransferService secureFileTransferServiceSpy = spy(secureFileTransferService);
+        doThrow(new IOException("File save error")).when(secureFileTransferServiceSpy)
+            .saveFileLocallyForSFTPTransfer(anyString(), anyString(), any());
+
+        // When: Calling the method
+        ResponseEntity<SecureFileTransferResponseMessage> response = 
+            secureFileTransferServiceSpy.transferFileFromAPIToServer(fileData, fileName, sourceFilePath, destinationFilePath);
+
+        // Then: Validate response and exception handling
+        assertNotNull(response);
+        assertNull(response.getBody()); // Since failure returns null
+    }
+
+    @Test
+    void shouldEnsureResourceCleanup() throws Exception {
+        // Given: Mock path storage and connection
+        Path mockPath = Path.of("/mock/storage/");
+        SecureFileTransferService secureFileTransferServiceSpy = spy(secureFileTransferService);
+        doReturn(mockPath).when(secureFileTransferServiceSpy).saveFileLocallyForSFTPTransfer(anyString(), anyString(), any());
+        doReturn(sftpChannel).when(secureFileTransferServiceSpy).createConnectionForSFTPChannel(anyString(), anyString(), anyString());
+
+        // When: Calling the method
+        secureFileTransferServiceSpy.transferFileFromAPIToServer(fileData, fileName, sourceFilePath, destinationFilePath);
+
+        // Then: Ensure cleanup happens
+        verify(sftpChannel, times(1)).exit();
+        verify(session, never()).disconnect();
+    }
+}
