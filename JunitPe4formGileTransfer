@@ -1,0 +1,89 @@
+package com.example.sftp.service;
+
+import com.example.sftp.response.SecureFileTransferResponseMessage;
+import com.jcraft.jsch.ChannelSftp;
+import com.jcraft.jsch.SftpException;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.ResponseEntity;
+
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.nio.file.Path;
+import java.util.concurrent.ExecutorService;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+import static org.springframework.http.HttpStatus.ACCEPTED;
+
+@ExtendWith(MockitoExtension.class)
+class SecureFileTransferServiceTest {
+
+    @InjectMocks
+    private SecureFileTransferService secureFileTransferService;
+
+    @Mock
+    private ChannelSftp channelSftp;
+
+    @Mock
+    private ExecutorService executorService;
+
+    private final String sourceFilePath = "/source/path/";
+    private final Path pathStored = Path.of("/local/storage/");
+    private final String destinationFilePath = "/destination/path/";
+    private final String fileName = "test.txt";
+
+    @BeforeEach
+    void setup() {
+        reset(channelSftp, executorService);
+    }
+
+    @Test
+    void shouldPerformFileTransferSuccessfully() throws Exception {
+        // Given: Mock input stream
+        InputStream inputStream = new ByteArrayInputStream("test data".getBytes());
+        when(channelSftp.get(anyString())).thenReturn(inputStream);
+
+        // When: Calling the method
+        ResponseEntity<SecureFileTransferResponseMessage> response = 
+            secureFileTransferService.performFileTransfer(channelSftp, sourceFilePath, pathStored, destinationFilePath, fileName);
+
+        // Then: Verify response and execution
+        assertNotNull(response);
+        assertEquals(ACCEPTED, response.getStatusCode());
+        assertTrue(response.getBody().isSuccess());
+        assertTrue(response.getBody().getMessage().contains("Successfully done SFTP file transfer"));
+    }
+
+    @Test
+    void shouldHandleSftpExceptionDuringTransfer() throws Exception {
+        // Given: Mock an SFTP exception
+        when(channelSftp.get(anyString())).thenThrow(new SftpException(0, "SFTP Error"));
+
+        // When: Calling the method
+        ResponseEntity<SecureFileTransferResponseMessage> response = 
+            secureFileTransferService.performFileTransfer(channelSftp, sourceFilePath, pathStored, destinationFilePath, fileName);
+
+        // Then: Verify response and error handling
+        assertNotNull(response);
+        assertTrue(response.getBody().getMessage().contains("Failed to copy"));
+    }
+
+    @Test
+    void shouldHandleGeneralExceptionDuringTransfer() throws Exception {
+        // Given: Mock a general exception
+        when(channelSftp.get(anyString())).thenThrow(new RuntimeException("Unexpected Error"));
+
+        // When: Calling the method
+        ResponseEntity<SecureFileTransferResponseMessage> response = 
+            secureFileTransferService.performFileTransfer(channelSftp, sourceFilePath, pathStored, destinationFilePath, fileName);
+
+        // Then: Verify response and error handling
+        assertNotNull(response);
+        assertTrue(response.getBody().getMessage().contains("Failed to copy"));
+    }
+}
