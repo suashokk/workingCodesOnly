@@ -1,0 +1,80 @@
+package com.example.controller;
+
+import com.example.service.SecureFileTransferService;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mockito;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.junit.jupiter.SpringExtension;
+import org.springframework.test.web.servlet.MockMvc;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+
+@ExtendWith(SpringExtension.class)
+@WebMvcTest(SecureFileTransferController.class)
+public class SecureFileTransferControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockBean
+    private SecureFileTransferService secureFileTransferService;
+
+    @Test
+    public void testMoveFile_Success() throws Exception {
+        // Given
+        byte[] fileData = "dummy data".getBytes();
+        String fileName = "testFile.txt";
+        String sourceFilePath = "/source/path/";
+        String destinationFilePath = "/destination/path/";
+
+        // Mock the service response
+        Mockito.when(secureFileTransferService.transferFileFromAPIToServer(fileData, fileName, sourceFilePath, destinationFilePath))
+                .thenReturn("File moved successfully");
+
+        // When & Then
+        mockMvc.perform(post("/move")
+                        .content(fileData)
+                        .contentType(MediaType.ALL_VALUE)
+                        .param("fileName", fileName)
+                        .param("sourceFilePath", sourceFilePath)
+                        .param("destinationFilePath", destinationFilePath))
+                .andExpect(status().isOk())
+                .andExpect(content().string("File moved successfully"));
+
+        // Verify that the service method was called once
+        Mockito.verify(secureFileTransferService, Mockito.times(1))
+                .transferFileFromAPIToServer(fileData, fileName, sourceFilePath, destinationFilePath);
+    }
+
+    @Test
+    public void testMoveFile_Failure() throws Exception {
+        // Given
+        byte[] fileData = "dummy data".getBytes();
+        String fileName = "testFile.txt";
+        String sourceFilePath = "/source/path/";
+        String destinationFilePath = "/destination/path/";
+
+        // Mock service throwing exception
+        Mockito.when(secureFileTransferService.transferFileFromAPIToServer(fileData, fileName, sourceFilePath, destinationFilePath))
+                .thenThrow(new RuntimeException("SFTP error"));
+
+        // When & Then
+        mockMvc.perform(post("/move")
+                        .content(fileData)
+                        .contentType(MediaType.ALL_VALUE)
+                        .param("fileName", fileName)
+                        .param("sourceFilePath", sourceFilePath)
+                        .param("destinationFilePath", destinationFilePath))
+                .andExpect(status().isOk()) // Should be modified if API returns different status
+                .andExpect(content().string("")); // Expecting null or empty response
+
+        // Verify that the service method was called once
+        Mockito.verify(secureFileTransferService, Mockito.times(1))
+                .transferFileFromAPIToServer(fileData, fileName, sourceFilePath, destinationFilePath);
+    }
+}
