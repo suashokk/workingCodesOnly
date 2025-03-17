@@ -1,0 +1,47 @@
+package com.example.sftp.response;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+class SecureFileTransferResponseMessageTest {
+
+    @Test
+    void shouldCreateResponseMessageWithAllFields() {
+        // Given: A response message with all fields set
+        SecureFileTransferResponseMessage responseMessage = 
+            new SecureFileTransferResponseMessage(true, "File transferred", "test.txt", "/remote/path/");
+
+        // Then: Validate field values
+        assertTrue(responseMessage.isSuccess());
+        assertEquals("File transferred", responseMessage.getMessage());
+        assertEquals("test.txt", responseMessage.getFileName());
+        assertEquals("/remote/path/", responseMessage.getFilePath());
+    }
+
+    @Test
+    void shouldCreateResponseMessageWithSuccessAndMessageOnly() {
+        // Given: A response message with only success and message
+        SecureFileTransferResponseMessage responseMessage = 
+            new SecureFileTransferResponseMessage(true, "Transfer successful");
+
+        // Then: Validate field values
+        assertTrue(responseMessage.isSuccess());
+        assertEquals("Transfer successful", responseMessage.getMessage());
+        assertNull(responseMessage.getFileName()); // Should be null if not set
+        assertNull(responseMessage.getFilePath()); // Should be null if not set
+    }
+
+    @Test
+    void shouldSetAndGetValuesProperly() {
+        // Given: A response message instance
+        SecureFileTransferResponseMessage responseMessage = new SecureFileTransferResponseMessage(false, "");
+
+        // When: Updating values
+        responseMessage.setSuccess(true);
+        responseMessage.setMessage("Updated message");
+
+        // Then: Validate changes
+        assertTrue(responseMessage.isSuccess());
+        assertEquals("Updated message", responseMessage.getMessage());
+    }
+}
