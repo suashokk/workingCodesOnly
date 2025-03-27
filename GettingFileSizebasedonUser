@@ -1,0 +1,51 @@
+import os
+import mmap
+from concurrent.futures import ProcessPoolExecutor
+
+def read_user_ids(file_path):
+    """
+    Reads user IDs from a given file and returns a set of unique IDs.
+    """
+    with open(file_path, 'r') as file:
+        return {line.strip() for line in file if line.strip()}
+
+def file_contains_user_id(file_path, user_ids):
+    """
+    Checks whether a file contains any of the user IDs.
+    Uses memory-mapped files for efficient large file reading.
+    """
+    try:
+        with open(file_path, 'r') as file:
+            with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as mmapped_file:
+                for user_id in user_ids:
+                    if mmapped_file.find(user_id.encode()) != -1:
+                        return os.path.getsize(file_path)
+    except Exception as e:
+        print(f"Error reading file {file_path}: {e}")
+    return 0
+
+def calculate_matching_files_size(folder_path, user_ids):
+    """
+    Calculates the total size of files that contain at least one user ID from the given set.
+    Uses multiprocessing for efficiency.
+    """
+    total_size = 0
+    with ProcessPoolExecutor() as executor:
+        file_sizes = executor.map(lambda file: file_contains_user_id(file, user_ids),
+                                  (os.path.join(root, file_name)
+                                   for root, _, files in os.walk(folder_path)
+                                   for file_name in files))
+        total_size = sum(file_sizes)
+    return total_size
+
+if __name__ == "__main__":
+    # Example paths (update these with your actual file paths)
+    user_ids_file = "C:\\Users\\Downloads\\unique_user_ids.txt"  # Text file containing user IDs
+    folder_path = "C:\\Users\\Downloads\\user_data"  # Folder containing files to check
+
+    # Read user IDs
+    user_ids = read_user_ids(user_ids_file)
+
+    # Calculate the total size of matching files
+    total_size = calculate_matching_files_size(folder_path, user_ids)
+    print(f"Total size of files containing any user ID: {total_size} bytes")
