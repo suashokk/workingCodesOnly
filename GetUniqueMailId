@@ -1,0 +1,37 @@
+import email
+import re
+import os
+
+def extract_unique_email_ids_from_eml(file_path):
+    """
+    Extracts unique email addresses from a single .eml file.
+    """
+    unique_emails = set()
+    with open(file_path, 'r') as file:
+        eml_content = file.read()
+    
+    msg = email.message_from_string(eml_content)
+    # Using regex to find email addresses
+    email_ids = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', eml_content)
+    unique_emails.update(email_ids)
+    return unique_emails
+
+def extract_unique_emails_from_folder(folder_path, output_file):
+    """
+    Extracts unique email addresses from all .eml files in a folder and saves them to a text file.
+    """
+    all_email_ids = set()
+    for filename in os.listdir(folder_path):
+        if filename.endswith('.eml'):
+            file_path = os.path.join(folder_path, filename)
+            email_ids = extract_unique_email_ids_from_eml(file_path)
+            all_email_ids.update(email_ids)
+    
+    with open(output_file, 'w') as file:
+        for email_id in sorted(all_email_ids):
+            file.write(email_id + '\n')
+
+if __name__ == "__main__":
+    folder_path = 'C:\\Users\\Downloads\\eml_files'
+    output_file = 'C:\\Users\\Downloads\\extracted_email_ids.txt'
+    extract_unique_emails_from_folder(folder_path, output_file)
