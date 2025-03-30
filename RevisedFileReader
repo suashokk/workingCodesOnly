@@ -1,0 +1,59 @@
+import csv
+import re
+from email import policy
+from email.parser import BytesParser
+
+def extract_emails_from_eml(eml_path):
+    with open(eml_path, 'rb') as f:
+        msg = BytesParser(policy=policy.default).parse(f)
+
+    all_text = str(msg)
+    emails = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", all_text)
+    return set(emails)  # remove duplicates
+
+def load_email_country_mapping(csv_path):
+    mapping = {}
+    with open(csv_path, mode='r', encoding='utf-8-sig') as f:
+        reader = csv.reader(f)
+        headers = next(reader)
+
+        # Handle flexible column names
+        try:
+            email_index = headers.index("EMAIL_ADDRESS")
+            country_index = headers.index("COUNTRY")
+        except ValueError:
+            raise Exception("Required columns 'EMAIL_ADDRESS' or 'COUNTRY' not found in CSV header.")
+
+        for row in reader:
+            if len(row) > max(email_index, country_index):
+                email = row[email_index].strip()
+                country = row[country_index].strip()
+                mapping[email] = country
+    return mapping
+
+def generate_mapping_output(eml_emails, email_country_map):
+    output = {}
+    for email in eml_emails:
+        country = email_country_map.get(email)
+        if country:
+            output[email] = country
+    return output
+
+def save_mapping_to_csv(mapping, output_file):
+    with open(output_file, mode='w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(["email", "country"])  # Header
+        for email, country in mapping.items():
+            writer.writerow([email, country])
+
+if __name__ == "__main__":
+    eml_file = "output.eml"
+    csv_file = "your_csv_file.csv"  # Replace with your actual CSV filename
+    output_file = "output_mapping.csv"
+
+    eml_emails = extract_emails_from_eml(eml_file)
+    email_country_map = load_email_country_mapping(csv_file)
+    result = generate_mapping_output(eml_emails, email_country_map)
+    save_mapping_to_csv(result, output_file)
+
+    print(f"Mapping saved to: {output_file}")
