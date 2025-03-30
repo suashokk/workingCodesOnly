@@ -1,0 +1,48 @@
+import csv
+import re
+from email import policy
+from email.parser import BytesParser
+
+def extract_emails_from_eml(eml_path):
+    with open(eml_path, 'rb') as f:
+        msg = BytesParser(policy=policy.default).parse(f)
+    
+    # Extract all text from email (headers + body)
+    all_text = str(msg)
+
+    # Use regex to extract email addresses
+    emails = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", all_text)
+    return set(emails)  # Use set to avoid duplicates
+
+def load_email_country_mapping(csv_path):
+    mapping = {}
+    with open(csv_path, mode='r', newline='', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        headers = next(reader)  # Skip the header row
+        email_index = headers.index("email")
+        country_index = headers.index("country")
+        for row in reader:
+            email = row[email_index].strip()
+            country = row[country_index].strip()
+            mapping[email] = country
+    return mapping
+
+def generate_mapping_output(eml_emails, email_country_map):
+    output = {}
+    for email in eml_emails:
+        country = email_country_map.get(email)
+        if country:
+            output[email] = country
+    return output
+
+if __name__ == "__main__":
+    eml_file = "output.eml"
+    csv_file = "data.csv"
+
+    eml_emails = extract_emails_from_eml(eml_file)
+    email_country_map = load_email_country_mapping(csv_file)
+    result = generate_mapping_output(eml_emails, email_country_map)
+
+    # Print result
+    for email, country in result.items():
+        print(f"{email} -> {country}")
