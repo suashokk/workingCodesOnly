@@ -1,0 +1,44 @@
+import csv
+import os
+import email
+from email import policy
+
+# Set these paths before running
+csv_file_path = "path/to/output_mapping.csv"
+eml_folder_path = "path/to/eml_files/"
+selected_countries = ["IND", "GBR", "SGP"]  # Replace with your comma-separated list
+
+# Step 1: Load emails for selected countries
+def get_emails_for_countries(csv_path, countries):
+    emails = set()
+    with open(csv_path, mode='r', encoding='utf-8') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            if row['country'].strip() in countries:
+                emails.add(row['email'].strip().lower())
+    return emails
+
+# Step 2: Extract sender from .eml file
+def get_sender_from_eml(file_path):
+    try:
+        with open(file_path, 'rb') as f:
+            msg = email.message_from_binary_file(f, policy=policy.default)
+            return msg.get('From', '').strip().lower()
+    except:
+        return ""
+
+# Step 3: Loop through .eml files and calculate matched file sizes
+def get_total_matched_size(eml_folder, email_set):
+    total_size = 0
+    for filename in os.listdir(eml_folder):
+        if filename.endswith(".eml"):
+            full_path = os.path.join(eml_folder, filename)
+            sender = get_sender_from_eml(full_path)
+            if any(sender.endswith(e) for e in email_set):
+                total_size += os.path.getsize(full_path)
+    return total_size / (1024 * 1024)  # Convert to MB
+
+# Execution
+matched_emails = get_emails_for_countries(csv_file_path, selected_countries)
+total_size_mb = get_total_matched_size(eml_folder_path, matched_emails)
+print(f"Total matched .eml file size: {total_size_mb:.2f} MB")
