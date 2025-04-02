@@ -1,0 +1,27 @@
+import csv
+
+def extract_emails_by_country(csv_file, target_country):
+    emails = []
+    with open(csv_file, mode='r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            country = row['country'].strip().lower()
+            email = row['email'].strip()
+            if country == target_country.lower():
+                emails.append(email)
+    return emails
+
+def save_emails_to_txt(email_list, output_file):
+    with open(output_file, mode='w', encoding='utf-8') as f:
+        for email in email_list:
+            f.write(email + '\n')
+
+if __name__ == "__main__":
+    csv_file = "output_mapping.csv"
+    country = "India"  # Change as needed
+    output_file = "filtered_emails.txt"
+
+    filtered_emails = extract_emails_by_country(csv_file, country)
+    save_emails_to_txt(filtered_emails, output_file)
+
+    print(f"Saved {len(filtered_emails)} email(s) to: {output_file}")
