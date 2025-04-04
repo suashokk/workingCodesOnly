@@ -1,44 +1,34 @@
-import os
-import email
-from email import policy
-from email.parser import BytesParser
+# -*- coding: utf-8 -*-
+import csv
+import codecs
+import sys
 
-def load_filtered_emails(file_path):
-    import codecs
-    with codecs.open(file_path, 'r', encoding='utf-8') as f:
-        return set([line.strip().lower() for line in f if line.strip()])
+reload(sys)
+sys.setdefaultencoding('utf-8')
 
-def file_contains_any_email(filepath, email_set):
-    try:
-        with open(filepath, 'rb') as f:
-            msg = BytesParser(policy=policy.default).parse(f)
-            text = str(msg)
-            for email in email_set:
-                if email in text:
-                    return True
-    except Exception as e:
-        print("Error reading {}: {}".format(filepath, str(e)))
-    return False
+def extract_emails_by_countries(csv_file, countries_str):
+    target_countries = [c.strip().lower() for c in countries_str.split(",")]
+    emails = []
+    with codecs.open(csv_file, mode='r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            country = row['COUNTRY'].strip().lower()
+            email = row['EMAIL_ADDRESS'].strip().lower()
+            if country in target_countries:
+                emails.append(email)
+    return emails
 
-def scan_eml_files(folder_path, email_set):
-    total_files = 0
-    matched_files = 0
-
-    for root, _, files in os.walk(folder_path):
-        for file in files:
-            if file.lower().endswith(".eml"):
-                total_files += 1
-                full_path = os.path.join(root, file)
-                if file_contains_any_email(full_path, email_set):
-                    matched_files += 1
-
-    return matched_files, total_files
+def save_emails_to_txt(email_list, output_file):
+    with codecs.open(output_file, mode='w', encoding='utf-8') as f:
+        for email in email_list:
+            f.write(email + '\n')
 
 if __name__ == "__main__":
-    filtered_email_file = "/nas04/hrtest/filtered_emails.txt"
-    eml_folder = "/nas01/datacollection/dailyfeeds/emails/download/20250401_12-00"  # Folder with .eml files
+    csv_file = "/nas04/hrtest/output/output_mapping1.csv"
+    countries = "IND,CHN,SAU,TUR,ZMB,POL,FRA,SWE,DEU"  # Change as needed
+    output_file = "/nas04/hrtest/output/filtered_emails.txt"
 
-    filtered_emails = load_filtered_emails(filtered_email_file)
-    matched, total = scan_eml_files(eml_folder, filtered_emails)
+    filtered_emails = extract_emails_by_countries(csv_file, countries)
+    save_emails_to_txt(filtered_emails, output_file)
 
-    print("\nMatched .eml file(s): {} / {}".format(matched, total))
+    print("Saved {} email(s) to: {}".format(len(filtered_emails), output_file))
