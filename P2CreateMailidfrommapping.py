@@ -1,5 +1,10 @@
+# -*- coding: utf-8 -*-
 import csv
 import codecs
+import sys
+
+reload(sys)
+sys.setdefaultencoding('utf-8')
 
 def extract_emails_by_countries(csv_file, countries_str):
     target_countries = [c.strip().lower() for c in countries_str.split(",")]
@@ -8,7 +13,7 @@ def extract_emails_by_countries(csv_file, countries_str):
         reader = csv.DictReader(f)
         for row in reader:
             country = row['COUNTRY'].strip().lower()
-            email = row['EMAIL_ADDRESS'].strip()
+            email = row['EMAIL_ADDRESS'].strip().lower()
             if country in target_countries:
                 emails.append(email)
     return emails
@@ -26,4 +31,4 @@ if __name__ == "__main__":
     filtered_emails = extract_emails_by_countries(csv_file, countries)
     save_emails_to_txt(filtered_emails, output_file)
 
-    print "Saved {} email(s) to: {}".format(len(filtered_emails), output_file)
+    print("Saved {} email(s) to: {}".format(len(filtered_emails), output_file))
