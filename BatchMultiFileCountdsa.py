@@ -68,8 +68,8 @@ def scan_eml_files_batched(folder_path, email_set, max_workers=8, chunk_size=500
     return matched_files, total_files
 
 if __name__ == "__main__":
-    filtered_email_file = "/nas02/hrtest/filtered_emails.txt"
-    eml_folder = "/nas02/Datacopy/14-NOV-2024/Email-20241113_12-00-20241114003004"
+    filtered_email_file = "/"
+    eml_folder = ""
 
     filtered_emails = load_filtered_emails(filtered_email_file)
 
