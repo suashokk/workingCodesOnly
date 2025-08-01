@@ -1,0 +1,204 @@
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.xml.sax.InputSource;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.ByteArrayInputStream;
+import java.io.StringReader;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+class TradeNodeUtilTest {
+
+    @Test
+    void testGetTagValue() throws Exception {
+        String xml = "<file><size>123</size></file>";
+        Document doc = parseXml(xml);
+        Element element = doc.getDocumentElement();
+
+        String value = TradeNodeUtil.getTagValue("size", element);
+
+        assertEquals("123", value);
+    }
+
+    @Test
+    void testProcessFileEntry_PrintsExpectedFormat() throws Exception {
+        String xml = """
+                <entry vNName="file1">
+                    <size>456</size>
+                    <modified>2025-08-01</modified>
+                </entry>
+                """;
+        Document doc = parseXml(xml);
+        Element element = doc.getDocumentElement();
+
+        // Redirect console output to verify
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        System.setOut(new java.io.PrintStream(out));
+
+        TradeNodeUtil.processFileEntry(element, "  ");
+
+        String printed = out.toString();
+        assertTrue(printed.contains("file1"));
+        assertTrue(printed.contains("456"));
+        assertTrue(printed.contains("2025-08-01"));
+    }
+
+    @Test
+    void testExecuteCurlCommandFile_Success() throws Exception {
+        try (var mockedPB = Mockito.mockConstruction(ProcessBuilder.class,
+                (mockBuilder, context) -> {
+                    Process mockProcess = mock(Process.class);
+                    when(mockProcess.getInputStream())
+                            .thenReturn(new ByteArrayInputStream("mock output".getBytes()));
+                    when(mockProcess.waitFor()).thenReturn(0);
+                    when(mockBuilder.start()).thenReturn(mockProcess);
+                })) {
+
+            String result = TradeNodeUtil.executeCurlCommandFile(
+                    "http://mockurl", "Bearer token", "output.json"
+            );
+
+            assertEquals("output.json", result);
+        }
+    }
+
+    @Test
+    void testExecuteCurlCommandFile_Failure() throws Exception {
+        try (var mockedPB = Mockito.mockConstruction(ProcessBuilder.class,
+                (mockBuilder, context) -> {
+                    Process mockProcess = mock(Process.class);
+                    when(mockProcess.getInputStream())
+                            .thenReturn(new ByteArrayInputStream("error".getBytes()));
+                    when(mockProcess.waitFor()).thenReturn(1);
+                    when(mockBuilder.start()).thenReturn(mockProcess);
+                })) {
+
+            assertThrows(RuntimeException.class, () ->
+                    TradeNodeUtil.executeCurlCommandFile(
+                            "http://mockurl", "Bearer token", "output.json"
+                    )
+            );
+        }
+    }
+
+    private Document parseXml(String xml) throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        return builder.parse(new InputSource(new StringReader(xml)));
+    }
+}
+
+import org.junit.jupiter.api.Test;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.xml.sax.InputSource;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.StringReader;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class TradeNodeUtilGetTagValueTest {
+
+    @Test
+    void testGetTagValue_TagExists() throws Exception {
+        String xml = "<file><size>123</size></file>";
+        Document doc = parseXml(xml);
+        Element element = doc.getDocumentElement();
+
+        String value = TradeNodeUtil.getTagValue("size", element);
+
+        assertEquals("123", value);
+    }
+
+    @Test
+    void testGetTagValue_TagMissing() throws Exception {
+        String xml = "<file></file>";
+        Document doc = parseXml(xml);
+        Element element = doc.getDocumentElement();
+
+        String value = TradeNodeUtil.getTagValue("size", element);
+
+        assertEquals("", value);
+    }
+
+    private Document parseXml(String xml) throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        return builder.parse(new InputSource(new StringReader(xml)));
+    }
+}
+
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+
+import java.io.ByteArrayInputStream;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class TradeNodeUtilExecuteCurlCommandFileTest {
+
+    @Test
+    void testExecuteCurlCommandFile_Success() throws Exception {
+        try (var mockedPB = Mockito.mockConstruction(ProcessBuilder.class,
+                (mockBuilder, context) -> {
+                    Process mockProcess = mock(Process.class);
+                    when(mockProcess.getInputStream())
+                            .thenReturn(new ByteArrayInputStream("mock curl output".getBytes()));
+                    when(mockProcess.waitFor()).thenReturn(0);
+                    when(mockBuilder.start()).thenReturn(mockProcess);
+                })) {
+
+            // Should run without exception
+            TradeNodeUtil.executeCurlCommandFile(
+                    "http://mockurl", "Bearer token", "output.json"
+            );
+        }
+    }
+
+    @Test
+    void testExecuteCurlCommandFile_FailureExitCode() throws Exception {
+        try (var mockedPB = Mockito.mockConstruction(ProcessBuilder.class,
+                (mockBuilder, context) -> {
+                    Process mockProcess = mock(Process.class);
+                    when(mockProcess.getInputStream())
+                            .thenReturn(new ByteArrayInputStream("error".getBytes()));
+                    when(mockProcess.waitFor()).thenReturn(1); // Fail
+                    when(mockBuilder.start()).thenReturn(mockProcess);
+                })) {
+
+            RuntimeException ex = assertThrows(RuntimeException.class, () ->
+                    TradeNodeUtil.executeCurlCommandFile(
+                            "http://mockurl", "Bearer token", "output.json"
+                    )
+            );
+
+            assertTrue(ex.getMessage().contains("Curl command failed"));
+        }
+    }
+
+    @Test
+    void testExecuteCurlCommandFile_ExceptionDuringExecution() throws Exception {
+        try (var mockedPB = Mockito.mockConstruction(ProcessBuilder.class,
+                (mockBuilder, context) -> {
+                    when(mockBuilder.start()).thenThrow(new RuntimeException("ProcessBuilder failed"));
+                })) {
+
+            RuntimeException ex = assertThrows(RuntimeException.class, () ->
+                    TradeNodeUtil.executeCurlCommandFile(
+                            "http://mockurl", "Bearer token", "output.json"
+                    )
+            );
+
+            assertTrue(ex.getMessage().contains("Error executing curl command"));
+        }
+    }
+}
