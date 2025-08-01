@@ -1,0 +1,36 @@
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+public class TraderVoiceApplicationTest {
+
+    // ✅ Test normal execution of main()
+    @Test
+    void testMainWithValidArgs() throws Exception {
+        String[] args = {
+                "outputDir",       // outputFolderFileName
+                "authHeaderValue", // authorizationHeader
+                "http://dummy.url" // URL
+        };
+
+        assertDoesNotThrow(() -> TraderVoiceApplication.main(args));
+    }
+
+    // ✅ Test main() with missing args (edge case)
+    @Test
+    void testMainWithMissingArgs() {
+        String[] args = { "onlyOneArg" };
+        Exception ex = assertThrows(ArrayIndexOutOfBoundsException.class, () ->
+                TraderVoiceApplication.main(args)
+        );
+        assertNotNull(ex);
+    }
+
+    // ✅ Test main() with null args
+    @Test
+    void testMainWithNullArgs() {
+        assertThrows(NullPointerException.class, () ->
+                TraderVoiceApplication.main(null)
+        );
+    }
+}
