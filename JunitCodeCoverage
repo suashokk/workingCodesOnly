@@ -1,0 +1,108 @@
+import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
+import org.w3c.dom.Element;
+import org.w3c.dom.Document;
+import org.w3c.dom.NodeList;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.File;
+import java.io.IOException;
+
+public class TraderVoiceUtilTest {
+
+    // ✅ Covers "no file found" branch in parseDirectoryXML
+    @Test
+    void testParseDirectoryXML_NoFilesFound() {
+        assertDoesNotThrow(() -> {
+            TraderVoiceUtil.parseDirectoryXML("nonexistentDir", "outputDir");
+        });
+    }
+
+    // ✅ Covers normal XML parsing
+    @Test
+    void testParseDirectoryXML_ValidFile() throws Exception {
+        File tempDir = new File("tempTestDir");
+        tempDir.mkdir();
+
+        File xmlFile = new File(tempDir, "test.xml");
+        String xmlContent = "<root><tag>Hello</tag></root>";
+        java.nio.file.Files.write(xmlFile.toPath(), xmlContent.getBytes());
+
+        assertDoesNotThrow(() -> {
+            TraderVoiceUtil.parseDirectoryXML(tempDir.getAbsolutePath(), "outputDir");
+        });
+
+        xmlFile.delete();
+        tempDir.delete();
+    }
+
+    // ✅ Covers curl execution success
+    @Test
+    void testExecuteCurlCommand_ValidCommand() {
+        String result = TraderVoiceUtil.executeCurlCommand("echo", "Hello");
+        assertTrue(result.contains("Hello"));
+    }
+
+    // ✅ Covers curl execution failure (invalid command)
+    @Test
+    void testExecuteCurlCommand_InvalidCommand() {
+        String result = TraderVoiceUtil.executeCurlCommand("invalidCommand", "");
+        assertTrue(result.isEmpty() || result.toLowerCase().contains("error"));
+    }
+
+    // ✅ Covers processFileEntry with valid element
+    @Test
+    void testProcessFileEntry_ValidElement() throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        Document doc = builder.newDocument();
+
+        Element element = doc.createElement("entry");
+        Element tag = doc.createElement("tag");
+        tag.setTextContent("value");
+        element.appendChild(tag);
+
+        TraderVoiceUtil.processFileEntry(element, "outputDir");
+    }
+
+    // ✅ Covers processFileEntry with missing tag
+    @Test
+    void testProcessFileEntry_MissingTag() throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        Document doc = builder.newDocument();
+
+        Element element = doc.createElement("entry");
+        TraderVoiceUtil.processFileEntry(element, "outputDir");
+    }
+
+    // ✅ Covers getTagValue when tag exists
+    @Test
+    void testGetTagValue_TagExists() throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        Document doc = builder.newDocument();
+
+        Element parent = doc.createElement("parent");
+        Element tag = doc.createElement("tag");
+        tag.setTextContent("value123");
+        parent.appendChild(tag);
+
+        String value = TraderVoiceUtil.getTagValue("tag", parent);
+        assertEquals("value123", value);
+    }
+
+    // ✅ Covers getTagValue when tag missing
+    @Test
+    void testGetTagValue_TagMissing() throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        Document doc = builder.newDocument();
+
+        Element parent = doc.createElement("parent");
+
+        String value = TraderVoiceUtil.getTagValue("tag", parent);
+        assertNull(value);
+    }
+}
