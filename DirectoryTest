@@ -1,0 +1,25 @@
+import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
+import java.util.ArrayList;
+import java.util.List;
+
+public class DirectoryEntryTest {
+
+    @Test
+    void testGettersAndSetters() {
+        DirectoryEntry entry = new DirectoryEntry();
+
+        // Test string fields
+        entry.setPath("test/path");
+        assertEquals("test/path", entry.getPath());
+
+        entry.setParentPath("parent/path");
+        assertEquals("parent/path", entry.getParentPath());
+
+        entry.setPercentage("75%");
+        assertEquals("75%", entry.getPercentage());
+
+        entry.setType("folder");
+        assertEquals("folder", entry.getType());
+
+        entry.set
