@@ -1,0 +1,85 @@
+import java.io.*;
+import java.util.Properties;
+import javax.mail.*;
+import javax.mail.internet.*;
+
+public class SmtpRelay {
+
+    public static void main(String[] args) throws Exception {
+        if (args.length < 2) {
+            System.err.println("Usage: java SmtpRelay <conf.properties> <emlFile>");
+            System.exit(1);
+        }
+
+        String confPath = args[0];
+        String emlPath = args[1];
+
+        Properties conf = loadProperties(confPath);
+        MimeMessage original = parseEml(emlPath);
+        sendViaRelay(original, conf);
+    }
+
+    // Load properties from config file
+    private static Properties loadProperties(String path) throws IOException {
+        Properties p = new Properties();
+        try (InputStream in = new FileInputStream(path)) {
+            p.load(in);
+        }
+        return p;
+    }
+
+    // Parse .eml file into MimeMessage
+    private static MimeMessage parseEml(String emlFilePath) throws MessagingException, IOException {
+        Session dummySession = Session.getDefaultInstance(new Properties());
+        try (InputStream fis = new FileInputStream(emlFilePath)) {
+            return new MimeMessage(dummySession, fis);
+        }
+    }
+
+    // Send parsed eml as body via SMTP relay
+    private static void sendViaRelay(MimeMessage original, Properties conf) throws Exception {
+        // SMTP configuration
+        Properties props = new Properties();
+        props.put("mail.smtp.host", conf.getProperty("smtp.host"));
+        props.put("mail.smtp.port", conf.getProperty("smtp.port", "25"));
+        props.put("mail.smtp.auth", conf.getProperty("smtp.auth", "false"));
+        props.put("mail.smtp.starttls.enable", conf.getProperty("smtp.starttls.enable", "false"));
+
+        final String username = conf.getProperty("smtp.username");
+        final String password = conf.getProperty("smtp.password");
+
+        Session session;
+        if ("true".equalsIgnoreCase(conf.getProperty("smtp.auth"))) {
+            session = Session.getInstance(props, new Authenticator() {
+                @Override
+                protected PasswordAuthentication getPasswordAuthentication() {
+                    return new PasswordAuthentication(username, password);
+                }
+            });
+        } else {
+            session = Session.getInstance(props);
+        }
+
+        session.setDebug(true); // optional: shows SMTP debug output
+
+        // Create new message
+        MimeMessage relay = new MimeMessage(session);
+        relay.setFrom(new InternetAddress(conf.getProperty("mail.from")));
+        relay.setRecipients(Message.RecipientType.TO, InternetAddress.parse(conf.getProperty("mail.to")));
+        relay.setSubject("Relayed: " + (original.getSubject() != null ? original.getSubject() : "(no subject)"));
+
+        // Embed original .eml as message/rfc822 attachment (preserves original content)
+        MimeBodyPart emlPart = new MimeBodyPart();
+        emlPart.setContent(original, "message/rfc822");
+
+        MimeMultipart multipart = new MimeMultipart();
+        multipart.addBodyPart(emlPart);
+
+        relay.setContent(multipart);
+        relay.saveChanges();
+
+        // Send
+        Transport.send(relay);
+        System.out.println("✅ EML relayed successfully.");
+    }
+}
