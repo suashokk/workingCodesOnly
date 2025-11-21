@@ -1,0 +1,223 @@
+// package your.package.here;
+
+import lombok.extern.slf4j.Slf4j;
+
+import javax.mail.Address;
+import javax.mail.BodyPart;
+import javax.mail.Message;
+import javax.mail.MessagingException;
+import javax.mail.Multipart;
+import javax.mail.Session;
+import javax.mail.Transport;
+import javax.mail.internet.InternetAddress;
+import javax.mail.internet.MimeMessage;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.nio.file.Files;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Properties;
+import java.util.concurrent.atomic.AtomicInteger;
+
+@Slf4j
+public class WorkerThread implements Runnable {
+
+    private final Session mailSession;
+    private final String emlFilePath;
+    private final Properties properties;
+    private final HashMap<String, String> propertiesMap; // kept in case you use it elsewhere
+    private final List<String> passedList;
+    private final List<String> failedList;
+    private final AtomicInteger failedCount;
+
+    public WorkerThread(Session mailSession,
+                        String emlFilePath,
+                        Properties properties,
+                        HashMap<String, String> propertiesMap,
+                        List<String> passedList,
+                        List<String> failedList,
+                        AtomicInteger failedCount) {
+
+        this.mailSession = mailSession;
+        this.emlFilePath = emlFilePath;
+        this.properties = properties;
+        this.propertiesMap = propertiesMap;
+        this.passedList = passedList;
+        this.failedList = failedList;
+        this.failedCount = failedCount;
+    }
+
+    @Override
+    public void run() {
+        File emlFile = new File(emlFilePath);
+        try {
+            log.info("Processing EML file: {}", emlFile.getName());
+
+            // 1) Load outer message from file into memory (prevents Stream Closed issues)
+            byte[] data = Files.readAllBytes(emlFile.toPath());
+            MimeMessage outer = new MimeMessage(mailSession, new ByteArrayInputStream(data));
+
+            // 2) Unwrap nested wrappers (journal, NDR, forwards, etc.) until we reach real mail
+            MimeMessage original = unwrapDeep(outer);
+
+            // 3) Build outgoing message based on original
+            MimeMessage out = new MimeMessage(mailSession);
+
+            // FROM: try original, then fallback to config FromMailId
+            Address[] from = original.getFrom();
+            if (from != null && from.length > 0) {
+                out.addFrom(from);
+            } else {
+                String fromProp = properties.getProperty("FromMailId");
+                if (fromProp != null && !fromProp.isEmpty()) {
+                    out.setFrom(new InternetAddress(fromProp));
+                }
+            }
+
+            // TO / CC / BCC: prefer inner(original), then outer; then fallback to PostfixToMailid
+            Address[] to  = getSafeRecipients(original, outer, Message.RecipientType.TO);
+            Address[] cc  = getSafeRecipients(original, outer, Message.RecipientType.CC);
+            Address[] bcc = getSafeRecipients(original, outer, Message.RecipientType.BCC);
+
+            // Debug – useful if something goes wrong
+            log.debug("Inner TO  : {}", Arrays.toString(original.getRecipients(Message.RecipientType.TO)));
+            log.debug("Outer TO  : {}", Arrays.toString(outer.getRecipients(Message.RecipientType.TO)));
+            log.debug("Chosen TO : {}", Arrays.toString(to));
+
+            // Final fallback: if absolutely nobody is set, use PostfixToMailid
+            if ((to == null || to.length == 0) &&
+                (cc == null || cc.length == 0) &&
+                (bcc == null || bcc.length == 0)) {
+
+                String fallback = properties.getProperty("PostfixToMailid");
+                if (fallback != null && !fallback.isEmpty()) {
+                    log.warn("No recipients found in inner/outer for {}. Using fallback {}",
+                             emlFile.getName(), fallback);
+                    to = InternetAddress.parse(fallback, false);
+                }
+            }
+
+            if (to  != null && to.length  > 0) out.setRecipients(Message.RecipientType.TO,  to);
+            if (cc  != null && cc.length  > 0) out.setRecipients(Message.RecipientType.CC,  cc);
+            if (bcc != null && bcc.length > 0) out.setRecipients(Message.RecipientType.BCC, bcc);
+
+            // Guard: must have at least one recipient
+            if (out.getAllRecipients() == null || out.getAllRecipients().length == 0) {
+                throw new MessagingException("No recipient addresses in inner, outer, or fallback for " + emlFile.getName());
+            }
+
+            // SUBJECT
+            out.setSubject(original.getSubject(), "UTF-8");
+
+            // BODY + ATTACHMENTS (keep content as-is)
+            Object content = original.getContent();
+            String contentType = original.getContentType();
+            out.setContent(content, contentType);
+
+            out.saveChanges();
+
+            // 4) Send
+            Transport.send(out);
+
+            synchronized (passedList) {
+                passedList.add(emlFilePath);
+            }
+            log.info("Successfully sent EML: {}", emlFile.getName());
+
+        } catch (Exception e) {
+            log.error("Failed to process/send EML {}: {}", emlFile.getName(), e.getMessage(), e);
+            synchronized (failedList) {
+                failedList.add(emlFilePath);
+            }
+            failedCount.incrementAndGet();
+        }
+    }
+
+    // ==================== Helper methods ====================
+
+    /**
+     * Unwrap nested messages up to 5 levels:
+     * - message/rfc822 parts
+     * - .eml attachments
+     */
+    private MimeMessage unwrapDeep(MimeMessage msg) {
+        MimeMessage current = msg;
+        try {
+            for (int depth = 0; depth < 5; depth++) {
+                MimeMessage next = extractOneLevel(current);
+                if (next == current) {
+                    break; // no more wrappers
+                }
+                current = next;
+            }
+        } catch (Exception e) {
+            log.warn("Error while unwrapping nested message: {}", e.getMessage(), e);
+        }
+        return current;
+    }
+
+    /**
+     * Extract one level of embedded message (if any).
+     */
+    private MimeMessage extractOneLevel(MimeMessage msg) {
+        try {
+            Object content = msg.getContent();
+            if (!(content instanceof Multipart)) {
+                return msg;
+            }
+
+            Multipart mp = (Multipart) content;
+
+            for (int i = 0; i < mp.getCount(); i++) {
+                BodyPart part = mp.getBodyPart(i);
+
+                // Case 1: embedded message as message/rfc822
+                if (part.isMimeType("message/rfc822")) {
+                    return createMessageFromPart(part);
+                }
+
+                // Case 2: attached .eml file
+                String fileName = part.getFileName();
+                if (fileName != null && fileName.toLowerCase().endsWith(".eml")) {
+                    return createMessageFromPart(part);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Error in extractOneLevel: {}", e.getMessage(), e);
+        }
+
+        return msg;
+    }
+
+    /**
+     * Create a new MimeMessage from a BodyPart by copying its bytes.
+     * This avoids SharedFileInputStream "Stream Closed" issues.
+     */
+    private MimeMessage createMessageFromPart(BodyPart part) throws Exception {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        part.writeTo(baos);
+        ByteArrayInputStream bais = new ByteArrayInputStream(baos.toByteArray());
+        return new MimeMessage(mailSession, bais);
+    }
+
+    /**
+     * Get recipients in this order:
+     *  1) from inner (original/effective) message
+     *  2) from outer (wrapper / journal / NDR) message
+     */
+    private Address[] getSafeRecipients(MimeMessage inner,
+                                        MimeMessage outer,
+                                        Message.RecipientType type) throws Exception {
+
+        Address[] r = (inner != null) ? inner.getRecipients(type) : null;
+        if (r != null && r.length > 0) return r;
+
+        r = (outer != null) ? outer.getRecipients(type) : null;
+        if (r != null && r.length > 0) return r;
+
+        return null;
+    }
+}
