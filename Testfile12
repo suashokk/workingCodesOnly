@@ -1,0 +1,149 @@
+package com.ngcs.csuvr.smarsh.recon.api.controller;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ngcs.csuvr.smarsh.recon.api.config.SmarshAuthProperties;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.client.RestTemplate;
+
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@WebMvcTest(ReconApiController.class)
+class ReconApiControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockBean
+    private RestTemplate restTemplate;
+
+    @MockBean
+    private SmarshAuthProperties smarshAuthProperties;
+
+    @MockBean
+    private ObjectMapper objectMapper;
+
+    private static final String URL = "/api/enterprise-recon/source-files";
+
+    /* -------------------------------------------------
+       TEST 1: COMPLETE SUCCESS FLOW
+       Covers:
+       - auth API success
+       - access_token present
+       - external API success
+     ------------------------------------------------- */
+    @Test
+    void uploadFile_success() throws Exception {
+
+        when(smarshAuthProperties.getClientId()).thenReturn("cid");
+        when(smarshAuthProperties.getClientSecret()).thenReturn("secret");
+
+        ResponseEntity<String> authResponse =
+                new ResponseEntity<>("{\"access_token\":\"token123\"}", HttpStatus.OK);
+
+        when(restTemplate.postForEntity(anyString(), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(authResponse)
+                .thenReturn(new ResponseEntity<>("SUCCESS", HttpStatus.OK));
+
+        mockMvc.perform(multipart(URL)
+                        .file("uploadFile", "data".getBytes())
+                        .param("version", "v1")
+                        .param("tenantId", "t1")
+                        .param("clientId", "c1"))
+                .andExpect(status().isOk());
+    }
+
+    /* -------------------------------------------------
+       TEST 2: AUTH API RETURNS NON-2XX
+       Covers:
+       - statusCode !2xx
+       - accessToken remains null
+     ------------------------------------------------- */
+    @Test
+    void uploadFile_authApiNon2xx() throws Exception {
+
+        when(restTemplate.postForEntity(anyString(), any(), eq(String.class)))
+                .thenReturn(new ResponseEntity<>("error", HttpStatus.BAD_REQUEST));
+
+        mockMvc.perform(multipart(URL)
+                        .file("uploadFile", "data".getBytes())
+                        .param("version", "v1")
+                        .param("tenantId", "t1")
+                        .param("clientId", "c1"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    /* -------------------------------------------------
+       TEST 3: ACCESS TOKEN MISSING IN RESPONSE
+       Covers:
+       - node.has("access_token") == false
+     ------------------------------------------------- */
+    @Test
+    void uploadFile_accessTokenMissing() throws Exception {
+
+        ResponseEntity<String> authResponse =
+                new ResponseEntity<>("{}", HttpStatus.OK);
+
+        when(restTemplate.postForEntity(anyString(), any(), eq(String.class)))
+                .thenReturn(authResponse);
+
+        mockMvc.perform(multipart(URL)
+                        .file("uploadFile", "data".getBytes())
+                        .param("version", "v1")
+                        .param("tenantId", "t1")
+                        .param("clientId", "c1"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    /* -------------------------------------------------
+       TEST 4: AUTH API THROWS EXCEPTION
+       Covers:
+       - catch block (BAD_GATEWAY)
+     ------------------------------------------------- */
+    @Test
+    void uploadFile_authApiException() throws Exception {
+
+        when(restTemplate.postForEntity(anyString(), any(), eq(String.class)))
+                .thenThrow(new RuntimeException("Auth API down"));
+
+        mockMvc.perform(multipart(URL)
+                        .file("uploadFile", "data".getBytes())
+                        .param("version", "v1")
+                        .param("tenantId", "t1")
+                        .param("clientId", "c1"))
+                .andExpect(status().isBadGateway());
+    }
+
+    /* -------------------------------------------------
+       TEST 5: EXTERNAL API FAILURE
+       Covers:
+       - second try/catch
+       - BAD_REQUEST path
+     ------------------------------------------------- */
+    @Test
+    void uploadFile_externalApiException() throws Exception {
+
+        ResponseEntity<String> authResponse =
+                new ResponseEntity<>("{\"access_token\":\"token123\"}", HttpStatus.OK);
+
+        when(restTemplate.postForEntity(anyString(), any(), eq(String.class)))
+                .thenReturn(authResponse)
+                .thenThrow(new RuntimeException("Upload failed"));
+
+        mockMvc.perform(multipart(URL)
+                        .file("uploadFile", "data".getBytes())
+                        .param("version", "v1")
+                        .param("tenantId", "t1")
+                        .param("clientId", "c1"))
+                .andExpect(status().isBadRequest());
+    }
+}
